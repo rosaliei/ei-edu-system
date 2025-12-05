@@ -157,7 +157,7 @@
                                style="flex: 1;"
                                onchange="updateToken('${session.sessionId}', '${student.token}', this)">
                     </div>
-                    <button onclick="copyLinkFromInput('${student.token}')" class="btn btn-sm">Copy Link</button>
+                    <button onclick="copyLinkFromInput('${student.token}', this)" class="btn btn-sm">Copy Link</button>
                 </div>
             `).join('');
             
@@ -184,10 +184,13 @@
             showToast('Link copied to clipboard!');
         }
 
-        function copyLinkFromInput(token) {
+        function copyLinkFromInput(originalToken, buttonElement) {
             const baseUrl = window.location.origin;
-            const input = document.getElementById(`token-${token}`);
-            if (input) {
+            // Find the input field in the same parent div as the button
+            const linkDiv = buttonElement.closest('.link-item');
+            const input = linkDiv.querySelector('.link-input');
+            
+            if (input && input.value) {
                 const fullLink = `${baseUrl}/student.html?token=${input.value}`;
                 navigator.clipboard.writeText(fullLink).then(() => {
                     showToast('Link copied to clipboard!');
@@ -196,8 +199,8 @@
                     showToast('Failed to copy link', 'error');
                 });
             } else {
-                // Fallback if input not found, use the original token
-                const fullLink = `${baseUrl}/student.html?token=${token}`;
+                // Fallback to original token
+                const fullLink = `${baseUrl}/student.html?token=${originalToken}`;
                 navigator.clipboard.writeText(fullLink).then(() => {
                     showToast('Link copied to clipboard!');
                 }).catch(err => {
