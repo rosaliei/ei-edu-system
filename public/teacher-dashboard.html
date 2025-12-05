@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teacher Dashboard - CV Submission Portal</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📋 CV Submission Portal</h1>
+            <p class="subtitle">Teacher Dashboard</p>
+        </header>
+
+        <div class="card">
+            <h2>Create New Session</h2>
+            <form id="createSessionForm">
+                <div class="form-group">
+                    <label for="sessionName">Session Name</label>
+                    <input type="text" id="sessionName" placeholder="e.g., Computer Science Batch 2024" required>
+                </div>
+                <div class="form-group">
+                    <label for="studentCount">Number of Students</label>
+                    <input type="number" id="studentCount" min="1" max="100" placeholder="e.g., 30" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Create Session</button>
+            </form>
+        </div>
+
+        <div class="card" id="sessionsList">
+            <h2>Active Sessions</h2>
+            <div id="sessionsContainer">
+                <p class="text-muted">No sessions created yet. Create one above to get started.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Student Links -->
+    <div id="linksModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Student Links Generated</h2>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p class="info-text">Share these unique links with your students. Each link is for one student only.</p>
+                <div id="studentLinksList"></div>
+                <div class="modal-actions">
+                    <button id="copyAllLinks" class="btn btn-secondary">Copy All Links</button>
+                    <button id="downloadLinks" class="btn btn-secondary">Download as Text</button>
+                    <button id="goToMonitor" class="btn btn-primary">Go to Monitor</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const createSessionForm = document.getElementById('createSessionForm');
+        const sessionsContainer = document.getElementById('sessionsContainer');
+        const linksModal = document.getElementById('linksModal');
+        const studentLinksList = document.getElementById('studentLinksList');
+        const closeModal = document.querySelector('.close');
+        
+        let currentSession = null;
+
+        // Load existing sessions
+        loadSessions();
+
+        createSessionForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const sessionName = document.getElementById('sessionName').value;
+            const studentCount = parseInt(document.getElementById('studentCount').value);
+            
+            try {
+                const response = await fetch('/api/sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionName, studentCount })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentSession = data.session;
+                    showLinksModal(data.session);
+                    createSessionForm.reset();
+                    loadSessions();
+                }
+            } catch (error) {
+                console.error('Error creating session:', error);
+                alert('Failed to create session. Please try again.');
+            }
+        });
+
+        async function loadSessions() {
+            try {
+                const response = await fetch('/api/sessions');
+                const sessions = await response.json();
+                
+                if (sessions.length === 0) {
+                    sessionsContainer.innerHTML = '<p class="text-muted">No sessions created yet. Create one above to get started.</p>';
+                    return;
+                }
+                
+                sessionsContainer.innerHTML = sessions.map(session => {
+                    const totalStudents = session.students.length;
+                    const onlineStudents = session.students.filter(s => s.online).length;
+                    const submittedStudents = session.students.filter(s => s.submitted).length;
+                    
+                    return `
+                        <div class="session-card">
+                            <div class="session-header">
+                                <h3>${session.sessionName}</h3>
+                                <span class="session-date">${new Date(session.createdAt).toLocaleString()}</span>
+                            </div>
+                            <div class="session-stats">
+                                <div class="stat">
+                                    <span class="stat-value">${totalStudents}</span>
+                                    <span class="stat-label">Total Students</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-value status-online">${onlineStudents}</span>
+                                    <span class="stat-label">Online</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-value status-submitted">${submittedStudents}</span>
+                                    <span class="stat-label">Submitted</span>
+                                </div>
+                            </div>
+                            <div class="session-actions">
+                                <button onclick="viewMonitor('${session.sessionId}')" class="btn btn-primary btn-sm">Live Monitor</button>
+                                <button onclick="viewLinks('${session.sessionId}')" class="btn btn-secondary btn-sm">View Links</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('Error loading sessions:', error);
+            }
+        }
+
+        function showLinksModal(session) {
+            const baseUrl = window.location.origin;
+            
+            studentLinksList.innerHTML = session.students.map(student => `
+                <div class="link-item">
+                    <span class="student-label">Student ${student.studentNumber}</span>
+                    <div style="display: flex; align-items: center; gap: 5px; flex: 1;">
+                        <span style="color: #666;">${baseUrl}/student.html?token=</span>
+                        <input type="text" class="link-input" id="token-${student.token}" 
+                               data-original="${student.token}" 
+                               data-session="${session.sessionId}"
+                               value="${student.token}" 
+                               style="flex: 1;"
+                               onchange="updateToken('${session.sessionId}', '${student.token}', this)">
+                    </div>
+                    <button onclick="copyLinkFromInput('${student.token}')" class="btn btn-sm">Copy Link</button>
+                </div>
+            `).join('');
+            
+            linksModal.style.display = 'flex';
+        }
+
+        async function viewLinks(sessionId) {
+            try {
+                const response = await fetch(`/api/sessions/${sessionId}`);
+                const session = await response.json();
+                currentSession = session;
+                showLinksModal(session);
+            } catch (error) {
+                console.error('Error loading session:', error);
+            }
+        }
+
+        function viewMonitor(sessionId) {
+            window.location.href = `/teacher-monitor.html?session=${sessionId}`;
+        }
+
+        function copyLink(link) {
+            navigator.clipboard.writeText(link);
+            showToast('Link copied to clipboard!');
+        }
+
+        function copyLinkFromInput(token) {
+            const baseUrl = window.location.origin;
+            const input = document.getElementById(`token-${token}`);
+            const fullLink = `${baseUrl}/student.html?token=${input.value}`;
+            navigator.clipboard.writeText(fullLink);
+            showToast('Link copied to clipboard!');
+        }
+
+        async function updateToken(sessionId, oldToken, inputElement) {
+            const newToken = inputElement.value.trim();
+            
+            if (!newToken) {
+                showToast('Token cannot be empty', 'error');
+                inputElement.value = oldToken;
+                return;
+            }
+            
+            if (newToken === oldToken) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/sessions/${sessionId}/student/${oldToken}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ newToken })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Update the input's id and data attributes
+                    inputElement.id = `token-${newToken}`;
+                    inputElement.dataset.original = newToken;
+                    
+                    // Update the copy button's onclick
+                    const linkItem = inputElement.closest('.link-item');
+                    const copyBtn = linkItem.querySelector('button');
+                    copyBtn.setAttribute('onclick', `copyLinkFromInput('${newToken}')`);
+                    
+                    // Reload current session data
+                    if (currentSession && currentSession.sessionId === sessionId) {
+                        const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
+                        currentSession = await sessionResponse.json();
+                    }
+                    
+                    showToast('Token updated successfully!');
+                } else {
+                    showToast(data.error || 'Failed to update token', 'error');
+                    inputElement.value = oldToken;
+                }
+            } catch (error) {
+                console.error('Error updating token:', error);
+                showToast('Failed to update token', 'error');
+                inputElement.value = oldToken;
+            }
+        }
+
+        document.getElementById('copyAllLinks').addEventListener('click', () => {
+            if (!currentSession) return;
+            
+            const baseUrl = window.location.origin;
+            const allLinks = currentSession.students.map(student => {
+                const input = document.getElementById(`token-${student.token}`);
+                return `Student ${student.studentNumber}: ${baseUrl}/student.html?token=${input.value}`;
+            }).join('\n');
+            
+            navigator.clipboard.writeText(allLinks);
+            showToast('All links copied to clipboard!');
+        });
+
+        document.getElementById('downloadLinks').addEventListener('click', () => {
+            if (!currentSession) return;
+            
+            const baseUrl = window.location.origin;
+            const content = `Session: ${currentSession.sessionName}\nCreated: ${new Date(currentSession.createdAt).toLocaleString()}\n\n` +
+                currentSession.students.map(student => {
+                    const input = document.getElementById(`token-${student.token}`);
+                    return `Student ${student.studentNumber}: ${baseUrl}/student.html?token=${input.value}`;
+                }).join('\n');
+            
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${currentSession.sessionName}-links.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        document.getElementById('goToMonitor').addEventListener('click', () => {
+            if (currentSession) {
+                viewMonitor(currentSession.sessionId);
+            }
+        });
+
+        closeModal.addEventListener('click', () => {
+            linksModal.style.display = 'none';
+        });
+
+        window.addEventListener('click', (e) => {
+            if (e.target === linksModal) {
+                linksModal.style.display = 'none';
+            }
+        });
+
+        function showToast(message) {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 100);
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Auto-refresh sessions every 10 seconds
+        setInterval(loadSessions, 10000);
+    </script>
+</body>
+</html>

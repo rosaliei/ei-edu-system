@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Monitor - CV Submission Portal</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="monitor-container">
+        <header class="monitor-header">
+            <div>
+                <h1>📊 Live Monitor</h1>
+                <p id="sessionName" class="subtitle">Loading...</p>
+            </div>
+            <div class="header-stats">
+                <div class="stat-badge">
+                    <span class="stat-value" id="totalCount">0</span>
+                    <span class="stat-label">Total</span>
+                </div>
+                <div class="stat-badge status-online">
+                    <span class="stat-value" id="onlineCount">0</span>
+                    <span class="stat-label">Online</span>
+                </div>
+                <div class="stat-badge status-submitted">
+                    <span class="stat-value" id="submittedCount">0</span>
+                    <span class="stat-label">Submitted</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="monitor-grid">
+            <!-- Left Panel: Students List -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Students</h2>
+                    <button id="refreshBtn" class="btn btn-sm">🔄 Refresh</button>
+                </div>
+                <div id="studentsList" class="students-list"></div>
+            </div>
+
+            <!-- Middle Panel: Live Preview -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Live CV Preview</h2>
+                    <span id="previewStudentInfo" class="text-muted">Select a student to view</span>
+                </div>
+                <div id="cvPreview" class="cv-preview">
+                    <p class="text-muted">Select a student from the list to see their CV in real-time</p>
+                </div>
+            </div>
+
+            <!-- Right Panel: Activity Log -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Activity Log</h2>
+                    <button id="clearLogBtn" class="btn btn-sm">Clear</button>
+                </div>
+                <div id="activityLog" class="activity-log"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('session');
+        
+        if (!sessionId) {
+            alert('No session specified!');
+            window.location.href = '/teacher-dashboard.html';
+        }
+
+        const socket = io();
+        let currentSession = null;
+        let selectedToken = null;
+        let studentCVData = {};
+
+        // DOM elements
+        const sessionNameEl = document.getElementById('sessionName');
+        const totalCountEl = document.getElementById('totalCount');
+        const onlineCountEl = document.getElementById('onlineCount');
+        const submittedCountEl = document.getElementById('submittedCount');
+        const studentsListEl = document.getElementById('studentsList');
+        const cvPreviewEl = document.getElementById('cvPreview');
+        const previewStudentInfoEl = document.getElementById('previewStudentInfo');
+        const activityLogEl = document.getElementById('activityLog');
+
+        // Initialize
+        loadSession();
+        socket.emit('teacherJoin', sessionId);
+
+        // Socket listeners
+        socket.on('sessionUpdate', (session) => {
+            currentSession = session;
+            updateUI();
+        });
+
+        socket.on('studentOnline', ({ token, studentNumber }) => {
+            addActivityLog(`Student ${studentNumber} came online`, 'online');
+            if (currentSession) {
+                const student = currentSession.students.find(s => s.token === token);
+                if (student) student.online = true;
+                updateUI();
+            }
+        });
+
+        socket.on('studentOffline', ({ token, studentNumber }) => {
+            addActivityLog(`Student ${studentNumber} went offline`, 'offline');
+            if (currentSession) {
+                const student = currentSession.students.find(s => s.token === token);
+                if (student) student.online = false;
+                updateUI();
+            }
+        });
+
+        socket.on('liveUpdate', ({ token, cvData, field, studentNumber, timestamp }) => {
+            studentCVData[token] = cvData;
+            
+            if (selectedToken === token) {
+                renderCVPreview(cvData, studentNumber);
+            }
+            
+            addActivityLog(`Student ${studentNumber} updated ${field || 'CV'}`, 'update');
+            
+            // Update progress in session
+            if (currentSession) {
+                const student = currentSession.students.find(s => s.token === token);
+                if (student) {
+                    student.progress = calculateProgress(cvData);
+                    student.name = cvData.profile?.name || null;
+                    updateUI();
+                }
+            }
+        });
+
+        socket.on('studentSubmitted', ({ token, cvViewLink, submittedAt }) => {
+            if (currentSession) {
+                const student = currentSession.students.find(s => s.token === token);
+                if (student) {
+                    student.submitted = true;
+                    student.cvViewLink = cvViewLink;
+                    student.submittedAt = submittedAt;
+                    
+                    const timeStr = new Date(submittedAt).toLocaleTimeString();
+                    addActivityLog(`Student ${student.studentNumber} submitted their CV at ${timeStr}`, 'submitted');
+                    
+                    // Show notification
+                    showCVLinkNotification(student.studentNumber, cvViewLink);
+                    
+                    updateUI();
+                }
+            }
+        });
+
+        function showCVLinkNotification(studentNumber, cvViewLink) {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #2ecc71;
+                color: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                z-index: 10000;
+                max-width: 400px;
+            `;
+            notification.innerHTML = `
+                <strong>✓ New CV Submitted!</strong><br>
+                Student ${studentNumber}<br>
+                <a href="${cvViewLink}" target="_blank" style="color: white; text-decoration: underline; display: inline-block; margin-top: 10px;">
+                    View CV →
+                </a>
+            `;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.transition = 'opacity 0.5s';
+                notification.style.opacity = '0';
+                setTimeout(() => notification.remove(), 500);
+            }, 5000);
+        }
+
+        async function loadSession() {
+            try {
+                const response = await fetch(`/api/sessions/${sessionId}`);
+                currentSession = await response.json();
+                updateUI();
+                
+                // Load existing CV data for all students
+                for (const student of currentSession.students) {
+                    loadStudentCV(student.token);
+                }
+                
+                // Display activity log
+                if (currentSession.activityLog) {
+                    currentSession.activityLog.forEach(log => {
+                        addActivityLog(log.details, 'info', log.timestamp);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading session:', error);
+                alert('Failed to load session');
+            }
+        }
+
+        async function loadStudentCV(token) {
+            try {
+                const response = await fetch(`/api/submission/${token}`);
+                const data = await response.json();
+                if (data.exists) {
+                    studentCVData[token] = data.data;
+                }
+            } catch (error) {
+                console.error('Error loading student CV:', error);
+            }
+        }
+
+        function updateUI() {
+            if (!currentSession) return;
+
+            sessionNameEl.textContent = currentSession.sessionName;
+            totalCountEl.textContent = currentSession.students.length;
+            onlineCountEl.textContent = currentSession.students.filter(s => s.online).length;
+            submittedCountEl.textContent = currentSession.students.filter(s => s.submitted).length;
+
+            renderStudentsList();
+        }
+
+        function renderStudentsList() {
+            if (!currentSession) return;
+
+            studentsListEl.innerHTML = currentSession.students.map(student => {
+                const cvData = studentCVData[student.token];
+                const name = cvData?.header?.fullName || cvData?.profile?.name || student.name || 'Unnamed';
+                const progress = student.progress || 0;
+                
+                const cvViewButton = student.cvViewLink ? 
+                    `<a href="${student.cvViewLink}" target="_blank" onclick="event.stopPropagation()" 
+                        class="btn btn-sm" style="margin-top: 5px; font-size: 11px; padding: 3px 8px;">
+                        📄 View CV
+                    </a>` : '';
+                
+                return `
+                    <div class="student-item ${selectedToken === student.token ? 'selected' : ''} ${student.online ? 'online' : 'offline'}"
+                         onclick="selectStudent('${student.token}', ${student.studentNumber})">
+                        <div class="student-info">
+                            <div class="student-status ${student.online ? 'status-online' : 'status-offline'}"></div>
+                            <div>
+                                <div class="student-name">Student ${student.studentNumber}</div>
+                                <div class="student-detail">${name}</div>
+                            </div>
+                        </div>
+                        <div class="student-meta">
+                            ${student.submitted ? '<span class="badge badge-success">✓ Submitted</span>' : ''}
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${progress}%"></div>
+                            </div>
+                            <span class="progress-text">${progress}%</span>
+                            ${cvViewButton}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function selectStudent(token, studentNumber) {
+            selectedToken = token;
+            const cvData = studentCVData[token];
+            renderStudentsList();
+            renderCVPreview(cvData, studentNumber);
+        }
+
+        function renderCVPreview(cvData, studentNumber) {
+            previewStudentInfoEl.textContent = `Student ${studentNumber}`;
+            
+            if (!cvData) {
+                cvPreviewEl.innerHTML = '<p class="text-muted">No data yet. Waiting for student to start...</p>';
+                return;
+            }
+
+            const header = cvData.header || {};
+            const profile = cvData.profile || '';
+            const experience = cvData.experience || '';
+            const education = cvData.education || '';
+            const personalDetails = cvData.personalDetails || '';
+            const references = cvData.references || '';
+
+            cvPreviewEl.innerHTML = `
+                <div class="cv-section">
+                    <h3>Contact Information</h3>
+                    <div class="cv-field"><strong>Name:</strong> ${header.fullName || '<em>Not provided</em>'}</div>
+                    <div class="cv-field"><strong>Address:</strong> ${header.address || '<em>Not provided</em>'}</div>
+                    <div class="cv-field"><strong>City:</strong> ${header.city || '<em>Not provided</em>'}</div>
+                    <div class="cv-field"><strong>Mobile:</strong> ${header.mobile || '<em>Not provided</em>'}</div>
+                    <div class="cv-field"><strong>Email:</strong> ${header.email || '<em>Not provided</em>'}</div>
+                </div>
+
+                <div class="cv-section">
+                    <h3>PROFILE</h3>
+                    <div class="cv-field">${profile ? profile.replace(/\n/g, '<br>') : '<em>Not provided</em>'}</div>
+                </div>
+
+                <div class="cv-section">
+                    <h3>EXPERIENCE</h3>
+                    <div class="cv-field">${experience ? experience.replace(/\n/g, '<br>') : '<em>Not provided</em>'}</div>
+                </div>
+
+                <div class="cv-section">
+                    <h3>EDUCATION AND QUALIFICATIONS</h3>
+                    <div class="cv-field">${education ? education.replace(/\n/g, '<br>') : '<em>Not provided</em>'}</div>
+                </div>
+
+                <div class="cv-section">
+                    <h3>PERSONAL DETAILS</h3>
+                    <div class="cv-field">${personalDetails ? personalDetails.replace(/\n/g, '<br>') : '<em>Not provided</em>'}</div>
+                </div>
+
+                <div class="cv-section">
+                    <h3>REFERENCES</h3>
+                    <div class="cv-field">${references || '<em>Not provided</em>'}</div>
+                </div>
+            `;
+        }
+
+        function addActivityLog(message, type = 'info', timestamp = null) {
+            const time = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.innerHTML = `
+                <span class="log-time">${time}</span>
+                <span class="log-message">${message}</span>
+            `;
+            activityLogEl.insertBefore(logEntry, activityLogEl.firstChild);
+            
+            // Keep only last 50 entries
+            while (activityLogEl.children.length > 50) {
+                activityLogEl.removeChild(activityLogEl.lastChild);
+            }
+        }
+
+        function calculateProgress(cvData) {
+            if (!cvData) return 0;
+            
+            let totalFields = 0;
+            let filledFields = 0;
+            
+            // Header section (5 fields)
+            if (cvData.header) {
+                totalFields += 5;
+                if (cvData.header.fullName) filledFields++;
+                if (cvData.header.address) filledFields++;
+                if (cvData.header.city) filledFields++;
+                if (cvData.header.mobile) filledFields++;
+                if (cvData.header.email) filledFields++;
+            }
+            
+            // Profile text area
+            if (cvData.profile !== undefined) {
+                totalFields += 1;
+                if (cvData.profile && cvData.profile.trim().length > 0) filledFields++;
+            }
+            
+            // Experience text area
+            if (cvData.experience !== undefined) {
+                totalFields += 1;
+                if (cvData.experience && cvData.experience.trim().length > 0) filledFields++;
+            }
+            
+            // Education text area
+            if (cvData.education !== undefined) {
+                totalFields += 1;
+                if (cvData.education && cvData.education.trim().length > 0) filledFields++;
+            }
+            
+            // Personal details text area
+            if (cvData.personalDetails !== undefined) {
+                totalFields += 1;
+                if (cvData.personalDetails && cvData.personalDetails.trim().length > 0) filledFields++;
+            }
+            
+            return totalFields > 0 ? Math.round((filledFields / totalFields) * 100) : 0;
+        }
+
+        document.getElementById('refreshBtn').addEventListener('click', () => {
+            loadSession();
+            addActivityLog('Data refreshed', 'info');
+        });
+
+        document.getElementById('clearLogBtn').addEventListener('click', () => {
+            activityLogEl.innerHTML = '';
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CV Submission Form</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="student-container">
+        <header class="student-header">
+            <h1>📝 CV Submission Form</h1>
+            <div class="connection-status">
+                <span id="connectionStatus" class="status-indicator">●</span>
+                <span id="connectionText">Connecting...</span>
+            </div>
+        </header>
+
+        <div id="invalidToken" class="error-message" style="display: none;">
+            <h2>Invalid Access Token</h2>
+            <p>The link you used is invalid or has expired. Please contact your teacher for a valid link.</p>
+        </div>
+
+        <form id="cvForm" style="display: none;">
+            <!-- Header Section -->
+            <div class="form-section">
+                <div class="form-group">
+                    <label for="fullName">Full Name *</label>
+                    <input type="text" id="fullName" name="fullName" required placeholder="[YOUR NAME HERE]">
+                </div>
+                <div class="form-group">
+                    <label for="address">Address *</label>
+                    <input type="text" id="address" name="address" required placeholder="[Your Address]">
+                </div>
+                <div class="form-group">
+                    <label for="city">City *</label>
+                    <input type="text" id="city" name="city" required placeholder="[City]">
+                </div>
+                <div class="form-group">
+                    <label for="mobile">Mobile Number (M) *</label>
+                    <input type="tel" id="mobile" name="mobile" required placeholder="[Mobile Number]">
+                </div>
+                <div class="form-group">
+                    <label for="email">Email Address (E) *</label>
+                    <input type="email" id="email" name="email" required placeholder="[Email Address]">
+                </div>
+            </div>
+
+            <!-- Profile Section -->
+            <div class="form-section">
+                <h2>PROFILE</h2>
+                <div class="form-group">
+                    <textarea id="profile" name="profile" rows="8" required placeholder="Enter your profile information here..."></textarea>
+                </div>
+            </div>
+
+            <!-- Experience Section -->
+            <div class="form-section">
+                <h2>EXPERIENCE</h2>
+                <div class="form-group">
+                    <textarea id="experience" name="experience" rows="10" required placeholder="Enter your experience here..."></textarea>
+                </div>
+            </div>
+
+            <!-- Education Section -->
+            <div class="form-section">
+                <h2>EDUCATION AND QUALIFICATIONS</h2>
+                <div class="form-group">
+                    <textarea id="education" name="education" rows="8" required placeholder="Enter your education and qualifications here..."></textarea>
+                </div>
+            </div>
+
+            <!-- Personal Details Section -->
+            <div class="form-section">
+                <h2>PERSONAL DETAILS</h2>
+                <div class="form-group">
+                    <textarea id="personalDetails" name="personalDetails" rows="8" required placeholder="Enter your personal details here..."></textarea>
+                </div>
+            </div>
+
+            <!-- References Section -->
+            <div class="form-section">
+                <h2>REFERENCES</h2>
+                <div class="form-group">
+                    <textarea id="references" name="references" rows="2" readonly>Available on request.</textarea>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-large">Submit CV</button>
+                <p class="auto-save-text">✓ Auto-saving as you type</p>
+                <div id="cvLinks" style="display: none; margin-top: 20px; padding: 20px; background: #e8f5e9; border-radius: 8px;">
+                    <p style="color: #2e7d32; font-weight: bold; margin-bottom: 10px;">✓ CV Submitted! You can continue editing and resubmit anytime.</p>
+                    <div style="display: flex; gap: 10px; justify-content: center;">
+                        <a id="viewCvLink" href="#" target="_blank" class="btn btn-primary">View CV</a>
+                    </div>
+                </div>
+            </div>
+        </form>
+
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        
+        if (!token) {
+            document.getElementById('invalidToken').style.display = 'block';
+            throw new Error('No token provided');
+        }
+
+        const socket = io();
+        let isConnected = false;
+        let saveTimeout = null;
+
+        // DOM elements
+        const cvForm = document.getElementById('cvForm');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const connectionText = document.getElementById('connectionText');
+        const invalidTokenEl = document.getElementById('invalidToken');
+
+        // Validate token
+        validateToken();
+
+        async function validateToken() {
+            try {
+                const response = await fetch(`/api/validate/${token}`);
+                const data = await response.json();
+                
+                if (data.valid) {
+                    cvForm.style.display = 'block';
+                    socket.emit('studentJoin', token);
+                    setupFormListeners();
+                    
+                    if (data.submitted) {
+                        // Already submitted, show CV link
+                        const cvLinksDiv = document.getElementById('cvLinks');
+                        cvLinksDiv.style.display = 'block';
+                        
+                        const baseUrl = window.location.origin;
+                        const viewLink = `${baseUrl}/cv-view.html?token=${token}`;
+                        
+                        document.getElementById('viewCvLink').href = viewLink;
+                    }
+                } else {
+                    invalidTokenEl.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error validating token:', error);
+                invalidTokenEl.style.display = 'block';
+            }
+        }
+
+        // Socket connection
+        socket.on('connect', () => {
+            isConnected = true;
+            updateConnectionStatus(true);
+        });
+
+        socket.on('disconnect', () => {
+            isConnected = false;
+            updateConnectionStatus(false);
+        });
+
+        socket.on('invalidToken', () => {
+            invalidTokenEl.style.display = 'block';
+            cvForm.style.display = 'none';
+        });
+
+        socket.on('existingData', (data) => {
+            populateForm(data);
+        });
+
+        function updateConnectionStatus(connected) {
+            if (connected) {
+                connectionStatus.className = 'status-indicator status-online';
+                connectionText.textContent = 'Connected';
+            } else {
+                connectionStatus.className = 'status-indicator status-offline';
+                connectionText.textContent = 'Disconnected';
+            }
+        }
+
+        function setupFormListeners() {
+            // Add listeners to all form inputs
+            const inputs = cvForm.querySelectorAll('input, textarea, select');
+            inputs.forEach(input => {
+                input.addEventListener('input', handleInputChange);
+            });
+        }
+
+        function handleInputChange(e) {
+            const field = e.target.name || e.target.id;
+            
+            // Debounce auto-save
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                const cvData = collectFormData();
+                socket.emit('cvUpdate', { token, cvData, field });
+            }, 500);
+        }
+
+        function collectFormData() {
+            return {
+                header: {
+                    fullName: document.getElementById('fullName').value,
+                    address: document.getElementById('address').value,
+                    city: document.getElementById('city').value,
+                    mobile: document.getElementById('mobile').value,
+                    email: document.getElementById('email').value
+                },
+                profile: document.getElementById('profile').value,
+                experience: document.getElementById('experience').value,
+                education: document.getElementById('education').value,
+                personalDetails: document.getElementById('personalDetails').value,
+                references: document.getElementById('references').value
+            };
+        }
+
+        function populateForm(data) {
+            if (!data) return;
+
+            if (data.header) {
+                document.getElementById('fullName').value = data.header.fullName || '';
+                document.getElementById('address').value = data.header.address || '';
+                document.getElementById('city').value = data.header.city || '';
+                document.getElementById('mobile').value = data.header.mobile || '';
+                document.getElementById('email').value = data.header.email || '';
+            }
+            if (data.profile) {
+                document.getElementById('profile').value = data.profile;
+            }
+            if (data.experience) {
+                document.getElementById('experience').value = data.experience;
+            }
+            if (data.education) {
+                document.getElementById('education').value = data.education;
+            }
+            if (data.personalDetails) {
+                document.getElementById('personalDetails').value = data.personalDetails;
+            }
+        }
+
+        cvForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const cvData = collectFormData();
+            
+            try {
+                const response = await fetch(`/api/submission/${token}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cvData })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Show success message and CV link
+                    const cvLinksDiv = document.getElementById('cvLinks');
+                    cvLinksDiv.style.display = 'block';
+                    
+                    // Set up CV link
+                    const baseUrl = window.location.origin;
+                    const viewLink = `${baseUrl}/cv-view.html?token=${token}`;
+                    
+                    document.getElementById('viewCvLink').href = viewLink;
+                    
+                    // Scroll to the link
+                    cvLinksDiv.scrollIntoView({ behavior: 'smooth' });
+                    
+                    alert('✓ CV submitted successfully! You can continue editing and resubmit anytime.');
+                }
+            } catch (error) {
+                console.error('Error submitting CV:', error);
+                alert('Failed to submit CV. Please try again.');
+            }
+        });
+
+    </script>
+</body>
+</html>

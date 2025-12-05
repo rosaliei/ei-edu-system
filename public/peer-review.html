@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peer Review - CV Submission</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .peer-container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .peer-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .peer-header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+
+        .peer-header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        .status-online {
+            background: #27ae60;
+            color: white;
+        }
+
+        .status-offline {
+            background: #95a5a6;
+            color: white;
+        }
+
+        .status-submitted {
+            background: #3498db;
+            color: white;
+        }
+
+        .cv-preview-section {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .cv-preview-section h2 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+
+        .cv-field {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+
+        .cv-field label {
+            display: block;
+            font-weight: bold;
+            color: #555;
+            margin-bottom: 5px;
+        }
+
+        .cv-field-content {
+            color: #333;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .progress-container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #ecf0f1;
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db 0%, #2ecc71 100%);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="peer-container">
+        <div class="peer-header">
+            <h1>📋 Peer Review</h1>
+            <p id="studentInfo">Loading...</p>
+            <span id="statusBadge" class="status-badge">Connecting...</span>
+        </div>
+
+        <div class="progress-container">
+            <h3 style="margin-bottom: 10px;">Completion Progress</h3>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%;">0%</div>
+            </div>
+        </div>
+
+        <div id="cvPreview">
+            <div class="empty-state">
+                <h2>Waiting for student to start...</h2>
+                <p>The CV content will appear here as the student fills out the form.</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        
+        if (!token) {
+            alert('Invalid peer review link!');
+            throw new Error('No token provided');
+        }
+
+        const socket = io();
+        let studentData = null;
+
+        // Validate token and load initial data
+        validateAndLoad();
+
+        async function validateAndLoad() {
+            try {
+                const response = await fetch(`/api/validate/${token}`);
+                const data = await response.json();
+                
+                if (!data.valid) {
+                    document.getElementById('studentInfo').textContent = 'Invalid token';
+                    return;
+                }
+
+                document.getElementById('studentInfo').textContent = `Student ${data.studentNumber}`;
+                
+                // Load existing submission data
+                const subResponse = await fetch(`/api/submission/${token}`);
+                const subData = await subResponse.json();
+                
+                if (subData.cvData) {
+                    renderCV(subData.cvData);
+                    updateProgress(subData.cvData);
+                }
+
+                if (data.submitted) {
+                    updateStatus('submitted');
+                }
+
+                // Join for live updates
+                socket.emit('peerJoin', token);
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        // Socket listeners
+        socket.on('connect', () => {
+            console.log('Connected to peer review');
+        });
+
+        socket.on('liveUpdate', ({ token: updateToken, cvData }) => {
+            if (updateToken === token) {
+                renderCV(cvData);
+                updateProgress(cvData);
+                updateStatus('online');
+            }
+        });
+
+        socket.on('studentSubmitted', ({ token: submitToken }) => {
+            if (submitToken === token) {
+                updateStatus('submitted');
+            }
+        });
+
+        function renderCV(cvData) {
+            if (!cvData) return;
+
+            const header = cvData.header || {};
+            const profile = cvData.profile || '';
+            const experience = cvData.experience || '';
+            const education = cvData.education || '';
+            const personalDetails = cvData.personalDetails || '';
+            const references = cvData.references || '';
+
+            let html = '';
+
+            // Header section
+            html += `
+                <div class="cv-preview-section">
+                    <h2>Contact Information</h2>
+                    <div class="cv-field">
+                        <label>Full Name</label>
+                        <div class="cv-field-content">${header.fullName || '<em>Not provided yet</em>'}</div>
+                    </div>
+                    <div class="cv-field">
+                        <label>Address</label>
+                        <div class="cv-field-content">${header.address || '<em>Not provided yet</em>'}</div>
+                    </div>
+                    <div class="cv-field">
+                        <label>City</label>
+                        <div class="cv-field-content">${header.city || '<em>Not provided yet</em>'}</div>
+                    </div>
+                    <div class="cv-field">
+                        <label>Mobile</label>
+                        <div class="cv-field-content">${header.mobile || '<em>Not provided yet</em>'}</div>
+                    </div>
+                    <div class="cv-field">
+                        <label>Email</label>
+                        <div class="cv-field-content">${header.email || '<em>Not provided yet</em>'}</div>
+                    </div>
+                </div>
+            `;
+
+            // Profile
+            html += `
+                <div class="cv-preview-section">
+                    <h2>PROFILE</h2>
+                    <div class="cv-field-content">${profile || '<em>Not provided yet</em>'}</div>
+                </div>
+            `;
+
+            // Experience
+            html += `
+                <div class="cv-preview-section">
+                    <h2>EXPERIENCE</h2>
+                    <div class="cv-field-content">${experience || '<em>Not provided yet</em>'}</div>
+                </div>
+            `;
+
+            // Education
+            html += `
+                <div class="cv-preview-section">
+                    <h2>EDUCATION AND QUALIFICATIONS</h2>
+                    <div class="cv-field-content">${education || '<em>Not provided yet</em>'}</div>
+                </div>
+            `;
+
+            // Personal Details
+            html += `
+                <div class="cv-preview-section">
+                    <h2>PERSONAL DETAILS</h2>
+                    <div class="cv-field-content">${personalDetails || '<em>Not provided yet</em>'}</div>
+                </div>
+            `;
+
+            // References
+            html += `
+                <div class="cv-preview-section">
+                    <h2>REFERENCES</h2>
+                    <div class="cv-field-content">${references || '<em>Not provided yet</em>'}</div>
+                </div>
+            `;
+
+            document.getElementById('cvPreview').innerHTML = html;
+        }
+
+        function updateProgress(cvData) {
+            let totalFields = 0;
+            let filledFields = 0;
+
+            // Header section (5 fields)
+            if (cvData.header) {
+                totalFields += 5;
+                if (cvData.header.fullName) filledFields++;
+                if (cvData.header.address) filledFields++;
+                if (cvData.header.city) filledFields++;
+                if (cvData.header.mobile) filledFields++;
+                if (cvData.header.email) filledFields++;
+            }
+
+            // Text areas (4 fields)
+            if (cvData.profile !== undefined) {
+                totalFields += 1;
+                if (cvData.profile && cvData.profile.trim().length > 0) filledFields++;
+            }
+            if (cvData.experience !== undefined) {
+                totalFields += 1;
+                if (cvData.experience && cvData.experience.trim().length > 0) filledFields++;
+            }
+            if (cvData.education !== undefined) {
+                totalFields += 1;
+                if (cvData.education && cvData.education.trim().length > 0) filledFields++;
+            }
+            if (cvData.personalDetails !== undefined) {
+                totalFields += 1;
+                if (cvData.personalDetails && cvData.personalDetails.trim().length > 0) filledFields++;
+            }
+
+            const progress = totalFields > 0 ? Math.round((filledFields / totalFields) * 100) : 0;
+            const progressFill = document.getElementById('progressFill');
+            progressFill.style.width = progress + '%';
+            progressFill.textContent = progress + '%';
+        }
+
+        function updateStatus(status) {
+            const badge = document.getElementById('statusBadge');
+            
+            if (status === 'online') {
+                badge.className = 'status-badge status-online';
+                badge.textContent = '● Online - Editing';
+            } else if (status === 'submitted') {
+                badge.className = 'status-badge status-submitted';
+                badge.textContent = '✓ Submitted';
+            } else {
+                badge.className = 'status-badge status-offline';
+                badge.textContent = '○ Offline';
+            }
+        }
+    </script>
+</body>
+</html>
