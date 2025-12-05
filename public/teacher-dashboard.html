@@ -283,7 +283,7 @@
                     // Update the copy button's onclick
                     const linkItem = inputElement.closest('.link-item');
                     const copyBtn = linkItem.querySelector('button');
-                    copyBtn.setAttribute('onclick', `copyLinkFromInput('${newToken}')`);
+                    copyBtn.setAttribute('onclick', `copyLinkFromInput('${newToken}', this)`);
                     
                     // Reload current session data
                     if (currentSession && currentSession.sessionId === sessionId) {
