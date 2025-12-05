@@ -182,9 +182,52 @@
             window.location.href = `/teacher-monitor.html?session=${sessionId}`;
         }
 
+        // Fallback copy function for non-HTTPS contexts
+        function copyToClipboardFallback(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                textArea.remove();
+                return true;
+            } catch (err) {
+                console.error('Fallback copy failed:', err);
+                textArea.remove();
+                return false;
+            }
+        }
+
+        // Universal copy function that works in both HTTP and HTTPS
+        async function copyToClipboard(text) {
+            // Try modern Clipboard API first (requires HTTPS)
+            if (navigator.clipboard && window.isSecureContext) {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                } catch (err) {
+                    console.error('Clipboard API failed:', err);
+                    return copyToClipboardFallback(text);
+                }
+            } else {
+                // Fallback for HTTP or older browsers
+                return copyToClipboardFallback(text);
+            }
+        }
+
         function copyLink(link) {
-            navigator.clipboard.writeText(link);
-            showToast('Link copied to clipboard!');
+            copyToClipboard(link).then(success => {
+                if (success) {
+                    showToast('Link copied to clipboard!');
+                } else {
+                    showToast('Failed to copy link', 'error');
+                }
+            });
         }
 
         function copyLinkFromInput(originalToken, buttonElement) {
@@ -193,24 +236,21 @@
             const linkDiv = buttonElement.closest('.link-item');
             const input = linkDiv.querySelector('.link-input');
             
+            let fullLink;
             if (input && input.value) {
-                const fullLink = `${baseUrl}/student.html?token=${input.value}`;
-                navigator.clipboard.writeText(fullLink).then(() => {
-                    showToast('Link copied to clipboard!');
-                }).catch(err => {
-                    console.error('Failed to copy:', err);
-                    showToast('Failed to copy link', 'error');
-                });
+                fullLink = `${baseUrl}/student.html?token=${input.value}`;
             } else {
                 // Fallback to original token
-                const fullLink = `${baseUrl}/student.html?token=${originalToken}`;
-                navigator.clipboard.writeText(fullLink).then(() => {
-                    showToast('Link copied to clipboard!');
-                }).catch(err => {
-                    console.error('Failed to copy:', err);
-                    showToast('Failed to copy link', 'error');
-                });
+                fullLink = `${baseUrl}/student.html?token=${originalToken}`;
             }
+            
+            copyToClipboard(fullLink).then(success => {
+                if (success) {
+                    showToast('Link copied to clipboard!');
+                } else {
+                    showToast('Failed to copy link', 'error');
+                }
+            });
         }
 
         async function updateToken(sessionId, oldToken, inputElement) {
@@ -272,8 +312,13 @@
                 return `Student ${student.studentNumber}: ${baseUrl}/student.html?token=${input.value}`;
             }).join('\n');
             
-            navigator.clipboard.writeText(allLinks);
-            showToast('All links copied to clipboard!');
+            copyToClipboard(allLinks).then(success => {
+                if (success) {
+                    showToast('All links copied to clipboard!');
+                } else {
+                    showToast('Failed to copy links', 'error');
+                }
+            });
         });
 
         document.getElementById('downloadLinks').addEventListener('click', () => {
