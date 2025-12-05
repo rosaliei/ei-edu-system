@@ -55,3 +55,4 @@ npm run dev
 - 32-character unique tokens per student
 - Session-based access control
 - Token validation on every connection
+# ei-edu-system
