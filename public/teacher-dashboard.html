@@ -187,9 +187,24 @@
         function copyLinkFromInput(token) {
             const baseUrl = window.location.origin;
             const input = document.getElementById(`token-${token}`);
-            const fullLink = `${baseUrl}/student.html?token=${input.value}`;
-            navigator.clipboard.writeText(fullLink);
-            showToast('Link copied to clipboard!');
+            if (input) {
+                const fullLink = `${baseUrl}/student.html?token=${input.value}`;
+                navigator.clipboard.writeText(fullLink).then(() => {
+                    showToast('Link copied to clipboard!');
+                }).catch(err => {
+                    console.error('Failed to copy:', err);
+                    showToast('Failed to copy link', 'error');
+                });
+            } else {
+                // Fallback if input not found, use the original token
+                const fullLink = `${baseUrl}/student.html?token=${token}`;
+                navigator.clipboard.writeText(fullLink).then(() => {
+                    showToast('Link copied to clipboard!');
+                }).catch(err => {
+                    console.error('Failed to copy:', err);
+                    showToast('Failed to copy link', 'error');
+                });
+            }
         }
 
         async function updateToken(sessionId, oldToken, inputElement) {
