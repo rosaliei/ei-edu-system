@@ -136,6 +136,7 @@
                             <div class="session-actions">
                                 <button onclick="viewMonitor('${session.sessionId}')" class="btn btn-primary btn-sm">Live Monitor</button>
                                 <button onclick="viewLinks('${session.sessionId}')" class="btn btn-secondary btn-sm">View Links</button>
+                                <button onclick="deleteSession('${session.sessionId}', '${session.sessionName}')" class="btn btn-sm" style="background-color: #dc3545; color: white;">Delete</button>
                             </div>
                         </div>
                     `;
@@ -180,6 +181,38 @@
 
         function viewMonitor(sessionId) {
             window.location.href = `/teacher-monitor.html?session=${sessionId}`;
+        }
+
+        async function deleteSession(sessionId, sessionName) {
+            if (!confirm(`Are you sure you want to delete session "${sessionName}"?\n\nThis will permanently delete all student tokens and submissions for this session. This action cannot be undone.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/sessions/${sessionId}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast('Session deleted successfully');
+                    
+                    // Close modal if it's the current session
+                    if (currentSession && currentSession.sessionId === sessionId) {
+                        linksModal.style.display = 'none';
+                        currentSession = null;
+                    }
+                    
+                    // Reload sessions list
+                    loadSessions();
+                } else {
+                    showToast('Failed to delete session', 'error');
+                }
+            } catch (error) {
+                console.error('Error deleting session:', error);
+                showToast('Failed to delete session', 'error');
+            }
         }
 
         // Fallback copy function for non-HTTPS contexts

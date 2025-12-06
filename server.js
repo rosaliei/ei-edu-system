@@ -157,6 +157,45 @@ app.put('/api/sessions/:sessionId/student/:oldToken', (req, res) => {
   res.json({ success: true, student });
 });
 
+// Delete a session
+app.delete('/api/sessions/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  const sessions = readSessions();
+  const sessionIndex = sessions.findIndex(s => s.sessionId === sessionId);
+  
+  if (sessionIndex === -1) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+  
+  const session = sessions[sessionIndex];
+  
+  // Remove all submissions for this session's students
+  const submissions = readSubmissions();
+  const studentTokens = session.students.map(s => s.token);
+  const updatedSubmissions = submissions.filter(sub => !studentTokens.includes(sub.token));
+  writeSubmissions(updatedSubmissions);
+  
+  // Remove the session
+  sessions.splice(sessionIndex, 1);
+  writeSessions(sessions);
+  
+  // Disconnect all active students from this session
+  session.students.forEach(student => {
+    const socketId = activeConnections.get(student.token);
+    if (socketId) {
+      const socket = io.sockets.sockets.get(socketId);
+      if (socket) {
+        socket.emit('sessionDeleted');
+        socket.disconnect();
+      }
+      activeConnections.delete(student.token);
+      socketToToken.delete(socketId);
+    }
+  });
+  
+  res.json({ success: true, message: 'Session deleted' });
+});
+
 // Validate student token
 app.get('/api/validate/:token', (req, res) => {
   const { token } = req.params;
