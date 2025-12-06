@@ -169,7 +169,8 @@ app.get('/api/validate/:token', (req, res) => {
         valid: true, 
         sessionId: session.sessionId,
         studentNumber: student.studentNumber,
-        submitted: student.submitted || false
+        submitted: student.submitted || false,
+        tokenName: token
       });
     }
   }

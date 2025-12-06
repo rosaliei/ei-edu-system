@@ -9,7 +9,7 @@
 <body>
     <div class="student-container">
         <header class="student-header">
-            <h1>📝 CV Submission Form</h1>
+            <h1>📝 CV Submission Form <span id="groupLabel" style="font-size: 0.8em; color: #666;"></span></h1>
             <div class="connection-status">
                 <span id="connectionStatus" class="status-indicator">●</span>
                 <span id="connectionText">Connecting...</span>
@@ -114,6 +114,21 @@
         let isConnected = false;
         let saveTimeout = null;
 
+        // Format token name for display
+        function formatTokenName(tokenName) {
+            if (!tokenName) return '';
+            
+            // Convert to title case and add "For" prefix
+            const formatted = tokenName
+                .replace(/([a-z])([A-Z])/g, '$1 $2') // Add space before capitals
+                .replace(/[_-]/g, ' ') // Replace underscores and hyphens with spaces
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ');
+            
+            return `(For ${formatted})`;
+        }
+
         // DOM elements
         const cvForm = document.getElementById('cvForm');
         const connectionStatus = document.getElementById('connectionStatus');
@@ -129,6 +144,12 @@
                 const data = await response.json();
                 
                 if (data.valid) {
+                    // Update group label
+                    if (data.tokenName) {
+                        const groupLabel = formatTokenName(data.tokenName);
+                        document.getElementById('groupLabel').textContent = groupLabel;
+                    }
+                    
                     cvForm.style.display = 'block';
                     socket.emit('studentJoin', token);
                     setupFormListeners();
