@@ -77,7 +77,7 @@ resource "huaweicloud_vpc_eip" "cv_eip" {
   }
   bandwidth {
     name        = "cv-portal-bandwidth"
-    size        = 30
+    size        = 10
     share_type  = "PER"
     charge_mode = "traffic"
   }
